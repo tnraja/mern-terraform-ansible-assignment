@@ -1,0 +1,83 @@
+---
+- name: Database server setup
+  hosts: db
+  become: yes
+  vars:
+    mongo_db_name: travelmemory
+    mongo_app_user: mernuser
+    mongo_app_password: "SecurePass@123"
+  tasks:
+    - name: Remove any existing MongoDB repo file
+      file:
+        path: /etc/apt/sources.list.d/mongodb-org-7.0.list
+        state: absent
+
+    - name: Install gnupg and curl
+      apt:
+        name: [gnupg, curl]
+        state: present
+        update_cache: yes
+
+    - name: Add MongoDB GPG key
+      shell: |
+        curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | \
+        gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+      args:
+        creates: /usr/share/keyrings/mongodb-server-7.0.gpg
+
+    - name: Add MongoDB apt repository
+      copy:
+        dest: /etc/apt/sources.list.d/mongodb-org-7.0.list
+        content: "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse\n"
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install MongoDB
+      apt:
+        name: mongodb-org
+        state: present
+
+    - name: Start and enable MongoDB
+      systemd:
+        name: mongod
+        state: started
+        enabled: yes
+
+    - name: Wait for MongoDB to be ready
+      wait_for:
+        port: 27017
+        delay: 5
+        timeout: 30
+
+    - name: Create app database and user
+      shell: |
+        mongosh --eval '
+          use {{ mongo_db_name }};
+          db.createUser({
+            user: "{{ mongo_app_user }}",
+            pwd: "{{ mongo_app_password }}",
+            roles: [{ role: "readWrite", db: "{{ mongo_db_name }}" }]
+          });
+        '
+      ignore_errors: yes
+
+    - name: Deploy mongod.conf (bind to private IP only)
+      template:
+        src: ../templates/mongod.conf.j2
+        dest: /etc/mongod.conf
+        backup: yes
+      notify: Restart MongoDB
+
+    - name: Configure UFW — allow MongoDB from VPC only
+      ufw:
+        rule: allow
+        port: "27017"
+        src: "10.0.0.0/16"
+
+  handlers:
+    - name: Restart MongoDB
+      systemd:
+        name: mongod
+        state: restarted

@@ -1,0 +1,70 @@
+---
+- name: Web server setup
+  hosts: web
+  become: yes
+
+  vars:
+    app_dir: /opt/travelmemory
+    node_version: "18"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - git
+          - build-essential
+          - nginx
+          - ufw
+        state: present
+
+    - name: Add NodeSource repo for Node.js 18
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js and NPM
+      apt:
+        name: nodejs
+        state: present
+        update_cache: yes
+
+    - name: Verify Node.js version
+      command: node --version
+      register: node_ver
+    - debug: msg="{{ node_ver.stdout }}"
+
+    - name: Install PM2 globally (process manager for Node)
+      npm:
+        name: pm2
+        global: yes
+        state: present
+
+    - name: Clone TravelMemory repository
+      git:
+        repo: https://github.com/UnpredictablePrashant/TravelMemory.git
+        dest: "{{ app_dir }}"
+        force: yes
+
+    - name: Install backend dependencies
+      npm:
+        path: "{{ app_dir }}/backend"
+        state: present
+
+    - name: Install frontend dependencies
+      npm:
+        path: "{{ app_dir }}/frontend"
+        state: present
+
+    - name: Set ownership of app directory
+      file:
+        path: "{{ app_dir }}"
+        owner: ubuntu
+        group: ubuntu
+        recurse: yes

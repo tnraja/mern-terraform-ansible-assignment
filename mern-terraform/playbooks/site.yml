@@ -1,0 +1,63 @@
+---
+- name: Security hardening
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Disable root login via SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin no'
+      notify: Restart SSH
+
+    - name: Disable password authentication (key pairs only)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+      notify: Restart SSH
+
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: "22"
+
+    - name: Allow HTTP (web server only)
+      ufw:
+        rule: allow
+        port: "80"
+      when: "'web' in group_names"
+
+    - name: Allow HTTPS (web server only)
+      ufw:
+        rule: allow
+        port: "443"
+      when: "'web' in group_names"
+
+    - name: Update all packages
+      apt:
+        upgrade: dist
+        update_cache: yes
+
+    - name: Install fail2ban (brute force protection)
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Start fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart SSH
+      systemd:
+        name: sshd
+        state: restarted
